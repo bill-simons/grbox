@@ -1,0 +1,157 @@
+#!/bin/bash
+
+### BEGIN INIT INFO
+# Provides:		gitmonitor
+# Required-Start:	$syslog
+# Required-Stop:	$syslog
+# Default-Start:	3 4 5
+# Default-Stop:		0 1 6
+# Short-Description:	Push git changes to server when master branch changes
+# Description:		Monitors changes to a git repository and pushes changes
+#                       on the master branch to the active server.
+### END INIT INFO
+
+set -e
+
+CONFIG_FILE="/etc/gitmonitor.conf"
+PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+LOGFILE="/var/log/gitmonitor.log"
+CHROOT="/var/run/gitmonitor/empty"
+PIDFILE="/var/run/gitmonitor/gitmonitor.pid"
+
+
+. /lib/lsb/init-functions
+
+
+if [ ! -e "${LOGFILE}" ]; then
+    touch "${LOGFILE}"
+    chmod 640 "${LOGFILE}"
+    chown root:adm "${LOGFILE}"
+fi
+if [ ! -d "${CHROOT}" ]; then
+    mkdir -p "${CHROOT}"/home/bsimons/bin/onGitChange.sh
+fi
+
+parse_config() {
+    # trim whitespace
+    line=`echo $1 | xargs`
+    repos=$2
+    branches=$3
+    commands=$4
+    if [[ "$line" != "" && $line != \#* ]]; then
+        repo=`echo   ${line} | awk -F: '{print $1}'`
+        branch=`echo ${line} | awk -F: '{print $2}'`
+        cmd=`echo    ${line} | awk -F: '{print $3}'`
+        path="${repo}/refs/heads/${branch}"
+        if [[ -f ${path} ]]; then
+            if [[ -f ${cmd} && -x ${cmd} ]]; then
+                repos[$i]=${repo}
+                branches[$i]=${branch}
+                commands[$i]=$cmd
+            else
+                warning_msg "Not an executable command: $cmd (for ${repo}:${branch} configuration)"
+            fi
+        else
+            warning_msg "Cannot find git ref file: ${path}"
+        fi
+    fi
+}
+
+
+do_monitor() {
+    if [[ -f ${CONFIG_FILE} ]]; then
+        declare -a repos
+        declare -a branches
+        declare -a commands
+        while IFS=  read aline; do
+            parse_config "$aline" $repos $branches $commands 
+        done < ${CONFIG_FILE}
+
+        numconfigs=${#repos[*]}
+        for (( i=0; i<${numconfigs}; i++ )); do
+            hdirs[$i]="${repos[$i]}/refs/heads"
+            heads[$i]=`cat "${repos[$i]}/refs/heads/${branches[$i]}"`
+        done
+        uniqhdirs=`echo "${hdirs[*]}" | tr ' ' '\n' | sort | uniq | xargs echo`
+        if [ "$uniqhdirs" != "" ]; then
+            numrepos=${#heads[*]}
+            mylog "Monitoring git heads at ${uniqhdirs}"
+            while inotifywait -qq -e moved_to ${uniqhdirs}; do 
+                sleep 1
+                for (( i=0; i<${numrepos}; i++ )); do
+                    head=`cat "${repos[$i]}/refs/heads/${branches[$i]}"`
+                    if [ "$head" != "${heads[$i]}" ]; then
+                        heads[$i]=${head}
+                        args="${repos[$i]} ${branches[$i]} ${head}"
+                        cmd="${commands[$i]}"
+                        mylog "Git update detected.  Launching: ${cmd} ${args}"
+                        ${cmd} ${args} &
+                    fi
+                done
+            done
+        else
+           warning_msg "No valid configurations found"
+        fi
+        rm -f $PIDFILE 
+    else
+        warning_msg "${CONFIG_FILE} not found"
+    fi
+}
+
+warning_msg() {
+    log_warning_msg "$1"
+    mylog "$1"
+}
+mylog() {
+    now=`date`
+    echo -e "${now}\t${1}" >> $LOGFILE
+}
+
+
+case "${1}" in
+       start)
+                mylog "Starting gitmonitor"
+                log_daemon_msg "Starting gitmonitor"
+
+                do_monitor &
+                echo $! > $PIDFILE
+                _PID="$(if [ -e ${PIDFILE} ]; then cat ${PIDFILE}; fi)"
+                if ps -C gitmonitor | grep -qs "${_PID}"
+                then
+                    mylog "gitmonitor with PID ${_PID} is started"
+                else
+                    warning_msg "gitmonitor failed - probably invalid config."
+                    exit 1
+                fi
+                log_end_msg 0
+                ;;
+
+        stop)
+                mylog "Stopping gitmonitor"
+                log_daemon_msg "Stopping gitmonitor"
+                _PID="$(if [ -e ${PIDFILE} ]; then cat ${PIDFILE}; fi)"
+                if ps -p "${_PID}" > /dev/nul
+                then
+                    kill -s HUP ${_PID}
+                    rm -f ${PIDFILE}
+                    mylog "gitmonitor with PID ${_PID} is stopped"
+                    log_end_msg 0
+                else
+                    log_end_msg 1
+                fi
+                ;;
+
+        restart)
+                ${0} stop
+                ${0} start
+                ;;
+
+        status)
+               status_of_proc "${DAEMON}" "gitmonitor"
+               ;;
+
+        *)
+               echo "Usage: ${0} {start|stop|restart|status}"
+               exit 1
+               ;;
+esac
