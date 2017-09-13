@@ -1,4 +1,4 @@
-##gitmonitor service
+## gitmonitor service
 
 A Linux ```systemd``` service to monitor for changes in git repositories accessible via the file system and run commands whenever the repository has changed.  Developed and tested on Ubuntu Zesty 17.04 only.
 
