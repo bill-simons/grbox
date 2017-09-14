@@ -130,7 +130,7 @@ case "${1}" in
                 mylog "Stopping gitmonitor"
                 log_daemon_msg "Stopping gitmonitor"
                 _PID="$(if [ -e ${PIDFILE} ]; then cat ${PIDFILE}; fi)"
-                if ps -p "${_PID}" > /dev/nul
+                if ps -p "${_PID}" > /dev/null
                 then
                     kill -s HUP ${_PID}
                     rm -f ${PIDFILE}

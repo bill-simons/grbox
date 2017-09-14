@@ -7,4 +7,6 @@ ExecStart=/home/bsimons/bin/gitmonitor start
 ExecStop=/home/bsimons/bin/gitmonitor stop
 ExecReload=/home/bsimons/bin/gitmonitor restart
 PIDFile=/var/run/gitmonitor/gitmonitor.pid
+User=bsimons
+Group=dev
 
