@@ -1,2 +1,2 @@
 # grbox
-Results of tinkering with code and new technologies.
+Place-holder for graphics and computation geometry experiments
